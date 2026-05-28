@@ -22,6 +22,15 @@ export const metadata: Metadata = {
   title: 'Dolap Stilisti',
   description: 'Kişisel akıllı gardırop asistanın',
   manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Dolap',
+  },
+  icons: {
+    icon: '/icon-192.png',
+    apple: '/icon-192.png',
+  },
 };
 
 export const viewport = {
