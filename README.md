@@ -66,7 +66,18 @@ Vercel'de yukarıdaki ortam değişkenlerini tanımla; `NEXTAUTH_URL`'i Vercel'i
 
 - [x] Adım 1: Repo iskeleti, layout, fontlar, renk değişkenleri, 4 boş sayfa
 - [x] Adım 2: Google OAuth (`drive.file`), Drive klasör kurulumu, `metadata.json` okuma
-- [ ] Adım 3: Yükleme akışı (rembg + Gemini + Drive)
+- [x] Adım 3: Yükleme akışı (rembg + Gemini + Drive) — foto seç → analiz → kategori onayı → kaydet
 - [ ] Adım 4: Kombin önerisi sayfası
 - [ ] Adım 5: Kayıtlı kombinler + manuel seçim
-- [ ] Adım 6: PWA manifest + service worker + IndexedDB cache
+- [ ] Adım 6: PWA manifest + service worker + IndexedDB cache (temel kurulum hazır)
+
+## Yükleme akışı (Adım 3)
+
+1. `/yukle` → fotoğraf seç/çek → "Analiz Et"
+2. `POST /api/garments/analyze` (server-side):
+   - Orijinali Drive `orijinal/` klasörüne yükler → `driveOrigId`
+   - `REMBG_URL`'e gönderir, şeffaf PNG'yi `izole/` klasörüne yükler → `driveIsoId` (best effort)
+   - Gemini 2.5 Flash-Lite ile structured JSON analiz: `{ kategori, altKategori, renkler, desen, mevsim }`
+3. Kullanıcı kategori/etiketleri onaylar/düzenler → "Kaydet"
+4. `metadata.json` okunur, yeni garment eklenir, Drive'a yazılır
+5. Dolabım grid'inde izole PNG görünür (Drive blob → IndexedDB cache)
