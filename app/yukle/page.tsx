@@ -83,13 +83,8 @@ function YukleContent() {
     setHata(null);
     try {
       // iPhone fotoğrafları 5-10 MB olabilir, Vercel 4.5 MB limiti var.
-      // Canvas ile max 1280px JPEG'e sıkıştırıyoruz (~400-800 KB).
-      let uploadBlob: Blob;
-      try {
-        uploadBlob = await compressImage(file);
-      } catch {
-        uploadBlob = file; // sıkıştırma başarısız olursa orijinali dene
-      }
+      // Çok-aşamalı Canvas sıkıştırma: 3.8 MB altına inene kadar kalite düşürülür.
+      const uploadBlob = await compressImage(file);
 
       const form = new FormData();
       form.append('file', uploadBlob, 'foto.jpg');
