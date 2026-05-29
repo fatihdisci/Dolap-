@@ -1,7 +1,7 @@
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '@/lib/auth';
-import { setupDriveFolders, uploadFile } from '@/lib/drive';
+import { uploadFile } from '@/lib/drive';
 import { removeBackground } from '@/lib/rembg';
 import { analyzeGarment, type GarmentAnalysis } from '@/lib/gemini';
 import type { StoredFolderIds } from '@/types';
@@ -16,6 +16,8 @@ const VARSAYILAN_ANALIZ: GarmentAnalysis = {
   mevsim: [],
 };
 
+// Yeni mimari: dosya client → Drive'a yüklenir (413 yok), bize sadece Drive ID gelir.
+// Biz Drive'dan indirip Gemini'ye göndeririz.
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   const token = session?.accessToken as string | undefined;
@@ -23,66 +25,55 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Oturum açılmamış' }, { status: 401 });
   }
 
-  let form: FormData;
+  let body: { driveOrigId?: string; folderIds?: StoredFolderIds };
   try {
-    form = await req.formData();
+    body = await req.json();
   } catch {
-    return NextResponse.json({ error: 'Geçersiz form verisi' }, { status: 400 });
+    return NextResponse.json({ error: 'Geçersiz JSON' }, { status: 400 });
   }
 
-  const file = form.get('file');
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: 'Dosya bulunamadı' }, { status: 400 });
-  }
-
-  // Klasör ID'leri client'tan gelebilir; yoksa kur (idempotent).
-  let folderIds: StoredFolderIds;
-  const folderIdsRaw = form.get('folderIds');
-  if (typeof folderIdsRaw === 'string') {
-    try {
-      folderIds = JSON.parse(folderIdsRaw);
-    } catch {
-      folderIds = await setupDriveFolders(token);
-    }
-  } else {
-    folderIds = await setupDriveFolders(token);
+  const { driveOrigId, folderIds } = body;
+  if (!driveOrigId || !folderIds) {
+    return NextResponse.json({ error: 'driveOrigId veya folderIds eksik' }, { status: 400 });
   }
 
   try {
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const mimeType = file.type || 'image/jpeg';
-    const baseName = `${Date.now()}-${(file.name || 'foto').replace(/[^\w.-]/g, '_')}`;
+    // 1. Drive'dan orijinali indir (küçük sunucu içi istek, Vercel body limiti yok).
+    const fileRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${driveOrigId}?alt=media`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!fileRes.ok) {
+      return NextResponse.json({ error: `Drive indirme hatası: ${fileRes.status}` }, { status: 502 });
+    }
+    const buffer = Buffer.from(await fileRes.arrayBuffer());
 
-    // 1. Orijinali Drive'a yükle.
-    const origBlob = new Blob([buffer], { type: mimeType });
-    const driveOrigId = await uploadFile(baseName, folderIds.orijinal, origBlob, mimeType, token);
-
-    // 2. rembg → izole PNG (best effort; başarısızsa null).
+    // 2. rembg → izole PNG (REMBG_URL varsa; yoksa null).
     let driveIsoId: string | null = null;
-    try {
-      const isoBlob = await removeBackground(origBlob, baseName);
-      const isoName = baseName.replace(/\.[^.]+$/, '') + '.png';
-      driveIsoId = await uploadFile(isoName, folderIds.izole, isoBlob, 'image/png', token);
-    } catch (err) {
-      console.error('rembg/izole hatası:', err);
+    if (process.env.REMBG_URL) {
+      try {
+        const origBlob = new Blob([buffer], { type: 'image/jpeg' });
+        const isoBlob = await removeBackground(origBlob, 'foto.jpg');
+        const isoName = `${Date.now()}-iso.png`;
+        driveIsoId = await uploadFile(isoName, folderIds.izole, isoBlob, 'image/png', token);
+      } catch (err) {
+        console.error('rembg hatası:', err);
+      }
     }
 
-    // 3. Gemini analiz (best effort; başarısızsa varsayılan).
+    // 3. Gemini analiz.
     let analysis: GarmentAnalysis = VARSAYILAN_ANALIZ;
+    let analizHatasi: string | null = null;
     try {
-      analysis = await analyzeGarment(buffer.toString('base64'), mimeType);
+      analysis = await analyzeGarment(buffer.toString('base64'), 'image/jpeg');
     } catch (err) {
-      console.error('Gemini analiz hatası:', err);
+      analizHatasi = err instanceof Error ? err.message : String(err);
+      console.error('Gemini analiz hatası:', analizHatasi);
     }
 
-    return NextResponse.json({
-      driveOrigId,
-      driveIsoId,
-      analysis,
-      folderIds,
-    });
+    return NextResponse.json({ driveOrigId, driveIsoId, analysis, folderIds, analizHatasi });
   } catch (err) {
-    console.error('Yükleme analiz hatası:', err);
-    return NextResponse.json({ error: 'Yükleme sırasında hata oluştu' }, { status: 500 });
+    console.error('Analiz hatası:', err);
+    return NextResponse.json({ error: 'Analiz sırasında hata oluştu' }, { status: 500 });
   }
 }

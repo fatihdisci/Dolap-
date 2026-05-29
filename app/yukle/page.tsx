@@ -2,8 +2,11 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import { AuthGuard } from '@/components/auth-guard';
 import { useStore } from '@/lib/store';
+import { compressImage } from '@/lib/compress-image';
+import { uploadFile } from '@/lib/drive';
 import type { Garment, Kategori, Mevsim, Metadata } from '@/types';
 import { ImagePlus, Loader2, Check, RotateCcw } from 'lucide-react';
 
@@ -21,12 +24,14 @@ type AnalyzeResult = {
     mevsim: Mevsim[];
   };
   folderIds: { root: string; orijinal: string; izole: string; metadataId: string };
+  analizHatasi?: string | null;
 };
 
 type Step = 'select' | 'analyzing' | 'review' | 'saving' | 'done';
 
 function YukleContent() {
   const router = useRouter();
+  const { data: session } = useSession();
   const { state, dispatch } = useStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -76,14 +81,32 @@ function YukleContent() {
 
   async function analizEt() {
     if (!file) return;
+    const token = (session as { accessToken?: string } | null)?.accessToken;
+    if (!token) { setHata('Oturum bulunamadı, sayfayı yenile.'); return; }
+    if (!state.folderIds) { setHata('Klasör yapısı hazır değil, bir saniye bekle.'); return; }
+
     setStep('analyzing');
     setHata(null);
     try {
-      const form = new FormData();
-      form.append('file', file);
-      if (state.folderIds) form.append('folderIds', JSON.stringify(state.folderIds));
+      // 1. Sıkıştır (Canvas, iPhone HEIC'i JPEG'e çevirir).
+      const uploadBlob = await compressImage(file);
 
-      const res = await fetch('/api/garments/analyze', { method: 'POST', body: form });
+      // 2. Direkt Drive'a yükle — Vercel'e büyük dosya hiç gitmiyor.
+      const fileName = `${Date.now()}-orig.jpg`;
+      const driveOrigId = await uploadFile(
+        fileName,
+        state.folderIds.orijinal,
+        uploadBlob,
+        'image/jpeg',
+        token,
+      );
+
+      // 3. Sadece Drive ID'yi Vercel'e gönder (küçük JSON, 413 yok).
+      const res = await fetch('/api/garments/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driveOrigId, folderIds: state.folderIds }),
+      });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Analiz başarısız');
@@ -176,7 +199,6 @@ function YukleContent() {
           ref={fileInputRef}
           type="file"
           accept="image/*"
-          capture="environment"
           onChange={fotoSec}
           className="hidden"
         />
@@ -217,7 +239,7 @@ function YukleContent() {
       {step === 'analyzing' && (
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <Loader2 size={28} className="animate-spin opacity-60" />
-          <p className="text-sm opacity-60">Analiz ediliyor — arka plan siliniyor ve etiketleniyor…</p>
+          <p className="text-sm opacity-60">Drive&apos;a yükleniyor ve AI analiz yapıyor…</p>
         </div>
       )}
 
@@ -269,7 +291,14 @@ function YukleContent() {
 
           <Alan label="Etiketler (virgülle, isteğe bağlı)" value={etiketler} onChange={setEtiketler} placeholder="favori, spor" />
 
-          {result && !result.driveIsoId && (
+          {result?.analizHatasi && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              AI analizi başarısız — alanları kendin doldur.<br />
+              <span className="opacity-70">{result.analizHatasi}</span>
+            </p>
+          )}
+
+          {result && !result.driveIsoId && !result.analizHatasi && (
             <p className="text-xs text-amber-600">
               Arka plan silinemedi; orijinal görsel kullanılacak.
             </p>
