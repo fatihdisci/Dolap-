@@ -11,34 +11,55 @@ export type GarmentAnalysis = {
   mevsim: Mevsim[];
 };
 
-const ANALYSIS_PROMPT = `Bu bir kıyafet fotoğrafı. Kıyafeti analiz et ve aşağıdaki alanları doldur:
-- kategori: üst, dış, alt, ayakkabı veya aksesuar
-- altKategori: spesifik tür (tişört, gömlek, ceket, jean, etek, sneaker, kemer vb.)
-- renkler: baskın renkler (Türkçe, en fazla 3)
-- desen: düz, çizgili, ekose, baskılı, kareli veya benzeri
-- mevsim: bu kıyafetin uygun olduğu mevsimler (ilkbahar, yaz, sonbahar, kış)
-Sadece JSON döndür.`;
+// responseSchema ile Türkçe enum değerleri Gemini structured output'u bozuyor.
+// JSON mime type + açık prompt yeterli; parsing tarafımızda yapılıyor.
+const ANALYSIS_PROMPT = `Analyze this clothing photo and return ONLY a JSON object with these exact fields:
 
-const RESPONSE_SCHEMA = {
-  type: 'OBJECT',
-  properties: {
-    kategori: {
-      type: 'STRING',
-      enum: ['üst', 'dış', 'alt', 'ayakkabı', 'aksesuar'],
-    },
-    altKategori: { type: 'STRING' },
-    renkler: { type: 'ARRAY', items: { type: 'STRING' } },
-    desen: { type: 'STRING' },
-    mevsim: {
-      type: 'ARRAY',
-      items: {
-        type: 'STRING',
-        enum: ['ilkbahar', 'yaz', 'sonbahar', 'kış'],
-      },
-    },
-  },
-  required: ['kategori', 'altKategori', 'renkler', 'desen', 'mevsim'],
+{
+  "kategori": "ust" | "dis" | "alt" | "ayakkabi" | "aksesuar",
+  "altKategori": "<specific type in Turkish: polo, gomlek, tshirt, ceket, pantolon, jean, etek, sneaker, kemer, etc.>",
+  "renkler": ["<color1 in Turkish>", "<color2 if present>"],
+  "desen": "<pattern in Turkish: duz, cizgili, ekose, baskili, kareli, cicekli, etc.>",
+  "mevsim": ["<season(s) in Turkish: ilkbahar | yaz | sonbahar | kis>"]
+}
+
+Rules:
+- kategori must be one of: ust, dis, alt, ayakkabi, aksesuar
+- renkler: list dominant colors in Turkish (max 3)
+- desen: describe the pattern/print
+- mevsim: list suitable seasons
+- Return ONLY the JSON, no markdown, no explanation.`;
+
+// Gemini'den gelen kısa İngilizce/ASCII değerleri Türkçe karşılıklarına dönüştür.
+const KATEGORI_MAP: Record<string, Kategori> = {
+  ust: 'üst', üst: 'üst',
+  dis: 'dış', dış: 'dış',
+  alt: 'alt',
+  ayakkabi: 'ayakkabı', ayakkabı: 'ayakkabı',
+  aksesuar: 'aksesuar',
+  top: 'üst', upper: 'üst', shirt: 'üst', tshirt: 'üst',
+  outer: 'dış', jacket: 'dış', coat: 'dış',
+  bottom: 'alt', pants: 'alt', skirt: 'alt',
+  shoes: 'ayakkabı', footwear: 'ayakkabı',
+  accessory: 'aksesuar',
 };
+
+const MEVSIM_MAP: Record<string, Mevsim> = {
+  ilkbahar: 'ilkbahar', spring: 'ilkbahar',
+  yaz: 'yaz', summer: 'yaz',
+  sonbahar: 'sonbahar', autumn: 'sonbahar', fall: 'sonbahar',
+  kis: 'kış', kış: 'kış', winter: 'kış',
+};
+
+function normalizeKategori(raw: string): Kategori {
+  return KATEGORI_MAP[raw?.toLowerCase()?.trim()] ?? 'üst';
+}
+
+function normalizeMevsim(raw: unknown[]): Mevsim[] {
+  return (raw || [])
+    .map((v) => MEVSIM_MAP[String(v).toLowerCase().trim()])
+    .filter(Boolean) as Mevsim[];
+}
 
 export async function analyzeGarment(
   imageBase64: string,
@@ -58,7 +79,7 @@ export async function analyzeGarment(
       ],
       generationConfig: {
         responseMimeType: 'application/json',
-        responseSchema: RESPONSE_SCHEMA,
+        temperature: 0.2,
       },
     }),
   });
@@ -69,10 +90,29 @@ export async function analyzeGarment(
   }
 
   const data = await res.json();
-  const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!raw) throw new Error('Gemini boş yanıt döndü');
 
-  return JSON.parse(raw) as GarmentAnalysis;
+  // Bazı modellerde text yerine parts[0].text boş gelir; farklı yerleri dene.
+  const rawText: string =
+    data?.candidates?.[0]?.content?.parts?.[0]?.text ??
+    data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data ??
+    '';
+
+  if (!rawText) {
+    const reason = data?.candidates?.[0]?.finishReason ?? 'unknown';
+    throw new Error(`Gemini boş yanıt (finishReason: ${reason})`);
+  }
+
+  // JSON kod bloğu içinde gelebilir (```json ... ```)
+  const jsonStr = rawText.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+  const parsed = JSON.parse(jsonStr);
+
+  return {
+    kategori: normalizeKategori(parsed.kategori),
+    altKategori: String(parsed.altKategori ?? '').trim(),
+    renkler: (parsed.renkler ?? []).map((r: unknown) => String(r).trim()).filter(Boolean),
+    desen: String(parsed.desen ?? 'düz').trim() || 'düz',
+    mevsim: normalizeMevsim(parsed.mevsim ?? []),
+  };
 }
 
 // ------------------------------------------------------------- kombin önerisi

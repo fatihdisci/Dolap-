@@ -21,6 +21,7 @@ type AnalyzeResult = {
     mevsim: Mevsim[];
   };
   folderIds: { root: string; orijinal: string; izole: string; metadataId: string };
+  analizHatasi?: string | null;
 };
 
 type Step = 'select' | 'analyzing' | 'review' | 'saving' | 'done';
@@ -289,7 +290,14 @@ function YukleContent() {
 
           <Alan label="Etiketler (virgülle, isteğe bağlı)" value={etiketler} onChange={setEtiketler} placeholder="favori, spor" />
 
-          {result && !result.driveIsoId && (
+          {result?.analizHatasi && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              AI analizi başarısız — alanları kendin doldur.<br />
+              <span className="opacity-70">{result.analizHatasi}</span>
+            </p>
+          )}
+
+          {result && !result.driveIsoId && !result.analizHatasi && (
             <p className="text-xs text-amber-600">
               Arka plan silinemedi; orijinal görsel kullanılacak.
             </p>

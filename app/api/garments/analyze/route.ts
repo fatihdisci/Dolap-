@@ -50,12 +50,17 @@ export async function POST(req: NextRequest) {
 
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
-    const mimeType = file.type || 'image/jpeg';
+
+    // iPhone HEIC/HEIF → Gemini desteklemez; JPEG olarak davran.
+    const rawMime = file.type || 'image/jpeg';
+    const geminiMime =
+      rawMime === 'image/heic' || rawMime === 'image/heif' ? 'image/jpeg' : rawMime;
+
     const baseName = `${Date.now()}-${(file.name || 'foto').replace(/[^\w.-]/g, '_')}`;
 
     // 1. Orijinali Drive'a yükle.
-    const origBlob = new Blob([buffer], { type: mimeType });
-    const driveOrigId = await uploadFile(baseName, folderIds.orijinal, origBlob, mimeType, token);
+    const origBlob = new Blob([buffer], { type: rawMime });
+    const driveOrigId = await uploadFile(baseName, folderIds.orijinal, origBlob, rawMime, token);
 
     // 2. rembg → izole PNG (REMBG_URL varsa; yoksa veya başarısızsa null).
     let driveIsoId: string | null = null;
@@ -69,12 +74,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Gemini analiz (best effort; başarısızsa varsayılan).
+    // 3. Gemini analiz (best effort; başarısızsa varsayılan + hata mesajı iletilir).
     let analysis: GarmentAnalysis = VARSAYILAN_ANALIZ;
+    let analizHatasi: string | null = null;
     try {
-      analysis = await analyzeGarment(buffer.toString('base64'), mimeType);
+      analysis = await analyzeGarment(buffer.toString('base64'), geminiMime);
     } catch (err) {
-      console.error('Gemini analiz hatası:', err);
+      analizHatasi = err instanceof Error ? err.message : String(err);
+      console.error('Gemini analiz hatası:', analizHatasi);
     }
 
     return NextResponse.json({
@@ -82,6 +89,7 @@ export async function POST(req: NextRequest) {
       driveIsoId,
       analysis,
       folderIds,
+      analizHatasi,
     });
   } catch (err) {
     console.error('Yükleme analiz hatası:', err);
