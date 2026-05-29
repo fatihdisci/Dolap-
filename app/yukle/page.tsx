@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGuard } from '@/components/auth-guard';
 import { useStore } from '@/lib/store';
+import { compressImage } from '@/lib/compress-image';
 import type { Garment, Kategori, Mevsim, Metadata } from '@/types';
 import { Camera, Images, Loader2, Check, RotateCcw, Plus } from 'lucide-react';
 
@@ -81,8 +82,17 @@ function YukleContent() {
     setStep('analyzing');
     setHata(null);
     try {
+      // iPhone fotoğrafları 5-10 MB olabilir, Vercel 4.5 MB limiti var.
+      // Canvas ile max 1280px JPEG'e sıkıştırıyoruz (~400-800 KB).
+      let uploadBlob: Blob;
+      try {
+        uploadBlob = await compressImage(file);
+      } catch {
+        uploadBlob = file; // sıkıştırma başarısız olursa orijinali dene
+      }
+
       const form = new FormData();
-      form.append('file', file);
+      form.append('file', uploadBlob, 'foto.jpg');
       if (state.folderIds) form.append('folderIds', JSON.stringify(state.folderIds));
 
       const res = await fetch('/api/garments/analyze', { method: 'POST', body: form });
