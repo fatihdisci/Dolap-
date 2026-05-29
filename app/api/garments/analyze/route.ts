@@ -57,14 +57,16 @@ export async function POST(req: NextRequest) {
     const origBlob = new Blob([buffer], { type: mimeType });
     const driveOrigId = await uploadFile(baseName, folderIds.orijinal, origBlob, mimeType, token);
 
-    // 2. rembg → izole PNG (best effort; başarısızsa null).
+    // 2. rembg → izole PNG (REMBG_URL varsa; yoksa veya başarısızsa null).
     let driveIsoId: string | null = null;
-    try {
-      const isoBlob = await removeBackground(origBlob, baseName);
-      const isoName = baseName.replace(/\.[^.]+$/, '') + '.png';
-      driveIsoId = await uploadFile(isoName, folderIds.izole, isoBlob, 'image/png', token);
-    } catch (err) {
-      console.error('rembg/izole hatası:', err);
+    if (process.env.REMBG_URL) {
+      try {
+        const isoBlob = await removeBackground(origBlob, baseName);
+        const isoName = baseName.replace(/\.[^.]+$/, '') + '.png';
+        driveIsoId = await uploadFile(isoName, folderIds.izole, isoBlob, 'image/png', token);
+      } catch (err) {
+        console.error('rembg/izole hatası:', err);
+      }
     }
 
     // 3. Gemini analiz (best effort; başarısızsa varsayılan).

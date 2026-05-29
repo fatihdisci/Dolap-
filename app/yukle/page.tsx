@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { AuthGuard } from '@/components/auth-guard';
 import { useStore } from '@/lib/store';
 import type { Garment, Kategori, Mevsim, Metadata } from '@/types';
-import { ImagePlus, Loader2, Check, RotateCcw } from 'lucide-react';
+import { Camera, Images, Loader2, Check, RotateCcw, Plus } from 'lucide-react';
 
 const KATEGORILER: Kategori[] = ['üst', 'dış', 'alt', 'ayakkabı', 'aksesuar'];
 const MEVSIMLER: Mevsim[] = ['ilkbahar', 'yaz', 'sonbahar', 'kış'];
@@ -28,7 +28,8 @@ type Step = 'select' | 'analyzing' | 'review' | 'saving' | 'done';
 function YukleContent() {
   const router = useRouter();
   const { state, dispatch } = useStore();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const galeriInputRef = useRef<HTMLInputElement>(null);
+  const kameraInputRef = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState<Step>('select');
   const [file, setFile] = useState<File | null>(null);
@@ -170,37 +171,56 @@ function YukleContent() {
         </div>
       )}
 
-      {/* Önizleme / foto seçimi */}
-      <div className="mb-5">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          onChange={fotoSec}
-          className="hidden"
-        />
-        {previewUrl ? (
-          <div className="relative overflow-hidden rounded-xl border border-[var(--kenar)] bg-[var(--panel)]">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={previewUrl} alt="Seçilen fotoğraf" className="max-h-80 w-full object-contain" />
-          </div>
-        ) : (
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-[var(--kenar)] bg-[var(--panel)] py-16 text-[var(--murekkep)] opacity-60 transition-colors hover:opacity-100"
-          >
-            <ImagePlus size={40} strokeWidth={1.5} />
-            <span className="text-sm font-medium">Fotoğraf seç veya çek</span>
-          </button>
-        )}
-      </div>
+      {/* Gizli inputlar — biri galeri, biri kamera */}
+      <input
+        ref={galeriInputRef}
+        type="file"
+        accept="image/*"
+        onChange={fotoSec}
+        className="hidden"
+      />
+      <input
+        ref={kameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={fotoSec}
+        className="hidden"
+      />
 
-      {/* Adıma göre aksiyonlar */}
-      {step === 'select' && previewUrl && (
-        <div className="flex gap-3">
+      {/* Önizleme */}
+      {previewUrl && (
+        <div className="mb-4 overflow-hidden rounded-xl border border-[var(--kenar)] bg-[var(--panel)]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={previewUrl} alt="Seçilen fotoğraf" className="max-h-80 w-full object-contain" />
+        </div>
+      )}
+
+      {/* Foto seçim butonları — henüz seçilmemişse büyük, seçildiyse küçük */}
+      {step === 'select' && !previewUrl && (
+        <div className="mb-5 grid grid-cols-2 gap-3">
           <button
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => galeriInputRef.current?.click()}
+            className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-[var(--kenar)] bg-[var(--panel)] py-12 text-[var(--murekkep)] opacity-70 transition-colors hover:opacity-100"
+          >
+            <Images size={32} strokeWidth={1.5} />
+            <span className="text-sm font-medium">Galeriden seç</span>
+          </button>
+          <button
+            onClick={() => kameraInputRef.current?.click()}
+            className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-[var(--kenar)] bg-[var(--panel)] py-12 text-[var(--murekkep)] opacity-70 transition-colors hover:opacity-100"
+          >
+            <Camera size={32} strokeWidth={1.5} />
+            <span className="text-sm font-medium">Fotoğraf çek</span>
+          </button>
+        </div>
+      )}
+
+      {/* Seçildikten sonra aksiyonlar */}
+      {step === 'select' && previewUrl && (
+        <div className="mb-5 flex gap-3">
+          <button
+            onClick={() => galeriInputRef.current?.click()}
             className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[var(--kenar)] bg-[var(--panel)] py-3 text-sm font-medium transition-colors hover:border-[var(--murekkep)]"
           >
             <RotateCcw size={18} /> Değiştir
@@ -306,7 +326,7 @@ function YukleContent() {
               onClick={sifirla}
               className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[var(--kenar)] bg-[var(--panel)] py-3 text-sm font-medium transition-colors hover:border-[var(--murekkep)]"
             >
-              <ImagePlus size={18} /> Yeni ekle
+              <Plus size={18} /> Yeni ekle
             </button>
             <button
               onClick={() => router.push('/')}
